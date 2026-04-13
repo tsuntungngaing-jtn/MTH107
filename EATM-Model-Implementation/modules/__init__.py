@@ -10,6 +10,11 @@ from .eatm import (
     pmv_iso_baseline_reference,
     simulate_platform_to_carriage,
 )
+from .pmv_dynamic_iso import (
+    Iso7730HeatLossesWM2,
+    iso7730_heat_losses_wm2,
+    pmv_dynamic_from_load,
+)
 from .environmental import EnvironmentalOutputs, environmental_bundle
 from .physiological import (
     PhysiologicalOutputs,
@@ -23,6 +28,7 @@ from .radiative import RadiativeOutputs, radiative_bundle_from_density
 __all__ = [
     "EATMTimePointResult",
     "EnvironmentalOutputs",
+    "Iso7730HeatLossesWM2",
     "PhysiologicalOutputs",
     "RadiativeOutputs",
     "SetTmpInputs",
@@ -30,6 +36,8 @@ __all__ = [
     "delta_set_kelvin",
     "environmental_bundle",
     "evaluate_physiological_state",
+    "iso7730_heat_losses_wm2",
+    "pmv_dynamic_from_load",
     "pmv_iso_baseline_reference",
     "radiative_bundle_from_density",
     "simulate_platform_to_carriage",

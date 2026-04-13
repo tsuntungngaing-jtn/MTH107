@@ -223,7 +223,9 @@ def boundary_defense_logistic(
     """
     Physiological veto / boundary-defense multiplier on expectancy credit.
 
-    f_def(omega) = 1 / (1 + exp(k * (omega - omega_crit)))
+    The logistic uses the full scaled difference in its argument::
+
+        f_def(omega) = 1 / (1 + exp(k * (omega - omega_crit))).
 
     For omega << omega_crit the multiplier approaches unity; beyond the ISO
     critical skin wettedness it collapses toward zero, removing psychological offset.

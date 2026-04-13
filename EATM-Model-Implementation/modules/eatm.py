@@ -1,9 +1,9 @@
 """
 Expectancy-Adjusted Thermal Model (EATM) orchestration on top of pythermalcomfort.
 
-The pipeline couples crowd microclimate corrections, pythermalcomfort SET for
-Thermal History Intensity, Gagge two-node skin wettedness, ISO PMV for the
-dynamic physical vote, and the expectancy offset lambda = G * THI * f_def.
+SET inputs for Thermal History Intensity use ``set_tmp``. The physical vote
+``PMV_dynamic`` follows the report/CBE dynamic bracket multiplied by the ISO 7730
+first-law thermal load L (W/m^2), not the steady ``pmv_ppd_iso`` shortcut.
 """
 
 from __future__ import annotations
@@ -24,12 +24,15 @@ from modules.environmental import (
     environmental_bundle,
     saturation_vapor_pressure_magnus_pa,
 )
+from modules.pmv_dynamic_iso import iso7730_heat_losses_wm2, pmv_dynamic_from_load
 from modules.physiological import (
     SetTmpInputs,
     boundary_defense_logistic,
     delta_set_kelvin,
+    heat_storage_transient_wm2,
     metabolic_rate_transient_met,
     psychological_offset_lambda,
+    skin_wettedness_from_fluxes,
     thermal_history_intensity,
 )
 from modules.radiative import clip_view_factors, interpersonal_view_factor, wall_view_factor
@@ -48,10 +51,14 @@ class EATMTimePointResult:
     local_rh_percent: float
     corrected_clo: float
     skin_wettedness: float
+    skin_wettedness_gagge: float
     delta_set_fixed_k: float
     thi: float
     boundary_defense: float
     lambda_offset: float
+    thermal_load_wm2: float
+    heat_storage_exponential_wm2: float
+    pmv_sensitivity_bracket: float
     pmv_dynamic: float
     pmv_eatm: float
 
@@ -93,9 +100,12 @@ def simulate_platform_to_carriage(
     """
     March the coupled EATM correction along a fixed-density carriage dwell.
 
-    Delta SET is evaluated once at the transition using SET(carriage, t=0+) -
-    SET(platform) so THI captures the thermal shock while the temporal decay
-    follows tau_exp.
+    Delta SET anchoring
+    --------------------
+    ``delta_set_fixed`` is evaluated once at carriage entry (t -> 0+) as
+    SET(carriage microclimate) - SET(platform). This encodes the **initial thermal
+    memory shock** carried by THI while the exponential habituation term applies
+    the expectancy decay in time.
     """
 
     p = params or TransitScenarioParameters()
@@ -128,7 +138,6 @@ def simulate_platform_to_carriage(
     f_pw = wall_view_factor(p.occupant_density_per_m2)
     f_pp_c, f_pw_c = clip_view_factors(f_pp, f_pw)
 
-    # Initial carriage microclimate at t=0 for SET shock anchoring.
     met0 = metabolic_rate_transient_met(0.0)
     env0 = environmental_bundle(
         p.carriage_nominal_v_ms,
@@ -139,7 +148,7 @@ def simulate_platform_to_carriage(
         p.clothing_base_clo,
         omega_lag,
     )
-    t_cl0, t_mr0 = solve_clothing_surface_temperature_coupled(
+    _, t_mr0 = solve_clothing_surface_temperature_coupled(
         ta_celsius=p.carriage_tdb_c,
         t_wall_celsius=p.carriage_wall_c,
         icl_clo=env0.corrected_clothing_insulation_clo,
@@ -196,19 +205,25 @@ def simulate_platform_to_carriage(
             met=met,
             clo=env.corrected_clothing_insulation_clo,
         )
-        omega = float(two.w)
-        omega_lag = omega
+        gagge_w = float(two.w)
+        if two.e_max and float(two.e_max) > 1e-9:
+            omega_ratio = skin_wettedness_from_fluxes(float(two.e_skin), float(two.e_max))
+        else:
+            omega_ratio = gagge_w
+        omega_lag = omega_ratio
 
-        pmv_dyn = float(
-            pmv_ppd_iso(
-                tdb=p.carriage_tdb_c,
-                tr=t_mr,
-                vr=env.local_air_velocity_ms,
-                rh=rh_loc,
-                met=met,
-                clo=env.corrected_clothing_insulation_clo,
-            ).pmv
+        losses = iso7730_heat_losses_wm2(
+            tdb=p.carriage_tdb_c,
+            tr=t_mr,
+            vr=env.local_air_velocity_ms,
+            vapor_pressure_pa=env.vapor_pressure_local_pa,
+            met=met,
+            clo=env.corrected_clothing_insulation_clo,
+            wme=0.0,
         )
+        thermal_load = losses.thermal_load
+        s_exp = heat_storage_transient_wm2(time_s)
+        pmv_dyn, bracket = pmv_dynamic_from_load(met, thermal_load)
 
         thi = thermal_history_intensity(
             delta_set_fixed,
@@ -217,8 +232,8 @@ def simulate_platform_to_carriage(
             TAU_EXPECTANCY_S,
             step_kind="cooling",
         )
-        f_def = boundary_defense_logistic(omega)
-        lam = psychological_offset_lambda(thi, omega)
+        f_def = boundary_defense_logistic(omega_ratio)
+        lam = psychological_offset_lambda(thi, omega_ratio)
         pmv_eatm = pmv_dyn - lam
 
         results.append(
@@ -230,11 +245,15 @@ def simulate_platform_to_carriage(
                 local_velocity_ms=env.local_air_velocity_ms,
                 local_rh_percent=rh_loc,
                 corrected_clo=env.corrected_clothing_insulation_clo,
-                skin_wettedness=omega,
+                skin_wettedness=omega_ratio,
+                skin_wettedness_gagge=gagge_w,
                 delta_set_fixed_k=delta_set_fixed,
                 thi=thi,
                 boundary_defense=f_def,
                 lambda_offset=lam,
+                thermal_load_wm2=thermal_load,
+                heat_storage_exponential_wm2=s_exp,
+                pmv_sensitivity_bracket=bracket,
                 pmv_dynamic=pmv_dyn,
                 pmv_eatm=pmv_eatm,
             )

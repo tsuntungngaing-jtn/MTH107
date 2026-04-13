@@ -20,11 +20,18 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from config import (
+    MAX_OCCUPANT_DENSITY_PER_M2,
     VIEW_FACTOR_INTERPERSONAL_RATE_KP,
     VIEW_FACTOR_MAX_PP,
     VIEW_FACTOR_WALL_BASELINE,
     VIEW_FACTOR_WALL_DECAY_KW,
 )
+
+
+def _density_clipped(density_per_m2: float) -> float:
+    """GB 50157 / report crowding bound [0, 9] pass/m^2."""
+
+    return min(MAX_OCCUPANT_DENSITY_PER_M2, max(0.0, float(density_per_m2)))
 
 
 @dataclass(frozen=True)
@@ -48,11 +55,8 @@ def interpersonal_view_factor(density_per_m2: float) -> float:
     which is zero at zero density and approaches F_max for large crowding.
     """
 
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
-    return VIEW_FACTOR_MAX_PP * (
-        1.0 - math.exp(-VIEW_FACTOR_INTERPERSONAL_RATE_KP * density_per_m2)
-    )
+    d = _density_clipped(density_per_m2)
+    return VIEW_FACTOR_MAX_PP * (1.0 - math.exp(-VIEW_FACTOR_INTERPERSONAL_RATE_KP * d))
 
 
 def wall_view_factor(density_per_m2: float) -> float:
@@ -62,11 +66,8 @@ def wall_view_factor(density_per_m2: float) -> float:
         F_p-wall = F_wall,0 * exp(-k_omega * D).
     """
 
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
-    return VIEW_FACTOR_WALL_BASELINE * math.exp(
-        -VIEW_FACTOR_WALL_DECAY_KW * density_per_m2
-    )
+    d = _density_clipped(density_per_m2)
+    return VIEW_FACTOR_WALL_BASELINE * math.exp(-VIEW_FACTOR_WALL_DECAY_KW * d)
 
 
 def clip_view_factors(f_pp: float, f_pwall: float, *, air_channel_floor: float = 1e-3) -> Tuple[float, float]:

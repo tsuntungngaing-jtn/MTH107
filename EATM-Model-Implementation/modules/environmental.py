@@ -14,19 +14,29 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from config import (
+    CLOTHING_COMPRESSION_FLOOR,
     CLOTHING_COMPRESSION_K,
     CLOTHING_WETNESS_DECAY_ALPHA,
     CRITICAL_SKIN_WETTEDNESS,
     FLOW_ATTENUATION_GAMMA,
+    MAX_OCCUPANT_DENSITY_PER_M2,
     METABOLIC_TRAIN_REFERENCE_MET,
     METABOLIC_VAPOR_COUPLING_ETA,
     MIN_LOCAL_AIR_VELOCITY_MS,
 )
+
+
+def _density_clipped_gb50157(density_per_m2: float) -> float:
+    """Clamp occupant density to the GB 50157 / report interval [0, 9] pass/m^2."""
+
+    return float(np.clip(float(density_per_m2), 0.0, MAX_OCCUPANT_DENSITY_PER_M2))
 
 
 @dataclass(frozen=True)
@@ -62,11 +72,8 @@ def flow_ventilation_factor(
 
     if nominal_velocity_ms < 0.0:
         raise ValueError("nominal_velocity_ms must be non-negative.")
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
-    v_local = epsilon_floor_ms + nominal_velocity_ms * math.exp(
-        -gamma * density_per_m2
-    )
+    d = _density_clipped_gb50157(density_per_m2)
+    v_local = epsilon_floor_ms + nominal_velocity_ms * math.exp(-gamma * d)
     if nominal_velocity_ms == 0.0:
         return 1.0
     return max(0.0, min(1.0, v_local / nominal_velocity_ms))
@@ -82,11 +89,8 @@ def local_air_velocity_ms(
 
     if nominal_velocity_ms < 0.0:
         raise ValueError("nominal_velocity_ms must be non-negative.")
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
-    return epsilon_floor_ms + nominal_velocity_ms * math.exp(
-        -gamma * density_per_m2
-    )
+    d = _density_clipped_gb50157(density_per_m2)
+    return epsilon_floor_ms + nominal_velocity_ms * math.exp(-gamma * d)
 
 
 def convective_heat_transfer_coefficient_w_m2_k(local_velocity_ms: float) -> float:
@@ -107,13 +111,10 @@ def saturation_vapor_pressure_magnus_pa(t_celsius: float) -> float:
     """
     Saturation vapor pressure (Pa) via the Tetens/Magnus form used in ASHRAE references.
 
-    The manuscript cites an exponential curve fit; for SI pascals this implementation
-    adopts the conventional Tetens expression::
-
-        p_sat = 610.78 * exp(17.27 * T / (T + 237.3)),
-
-    which remains aligned with ISO 7730 humidity conversions while avoiding unit
-    ambiguity in the typeset coefficients.
+    Implementation note (SI consistency): this routine uses the standard
+    Tetens/Magnus formulation in pascals as a numerically stable replacement for
+    the manuscript's exponential curve fit; it is thermodynamically equivalent for
+    humidity conversions within the ISO 7730 / CBE toolchain.
     """
 
     denom = t_celsius + 237.3
@@ -148,11 +149,10 @@ def local_vapor_pressure_pa(
 
     if p_vap_env_pa < 0.0:
         raise ValueError("p_vap_env_pa must be non-negative.")
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
     if m_train_reference_met <= 0.0:
         raise ValueError("m_train_reference_met must be positive.")
-    factor = 1.0 + eta * density_per_m2 * (metabolic_rate_met / m_train_reference_met)
+    d = _density_clipped_gb50157(density_per_m2)
+    factor = 1.0 + eta * d * (metabolic_rate_met / m_train_reference_met)
     return p_vap_env_pa * max(0.0, factor)
 
 
@@ -165,12 +165,15 @@ def clothing_compression_factor(
 
     A simple saturating rational form keeps the factor bounded::
 
-        f_clo = 1 / (1 + k * D).
+        f_clo = max(0.7, 1 / (1 + k * D)),
+
+    where the lower truncation limit avoids non-physical clo collapse under extreme
+    crowding (per report guidance on compression bounds).
     """
 
-    if density_per_m2 < 0.0:
-        raise ValueError("density_per_m2 must be non-negative.")
-    return 1.0 / (1.0 + k_compression * density_per_m2)
+    d = _density_clipped_gb50157(density_per_m2)
+    raw = 1.0 / (1.0 + k_compression * d)
+    return max(CLOTHING_COMPRESSION_FLOOR, raw)
 
 
 def clothing_wetness_insulation_factor(

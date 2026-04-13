@@ -21,7 +21,7 @@ METABOLIC_TRAIN_MET: float = 1.2
 
 # Anthropometry (DuBois area normalization when required by other modules)
 PARTICIPANT_MASS_KG: float = 70.0
-PARTICIPANT_HEIGHT_M: float = 1.73  # typical adult stature if not measured
+PARTICIPANT_HEIGHT_M: float = 1.75  # typical adult stature 
 
 # Skin wettedness and boundary defense
 CRITICAL_SKIN_WETTEDNESS: float = 0.25  # ISO 7730 sticky-discomfort threshold
@@ -68,3 +68,14 @@ NEWTON_MAX_ITERATIONS: int = 60
 
 # ISO 7730 metabolic conversion (W/m^2 per met) for skin-temperature proxy
 METABOLIC_W_PER_M2_PER_MET: float = 58.15
+
+# Dynamic PMV bracket (ISO 7730 / CBE kernel): PMV_dyn = (a*exp(b*m)+c0)*L, m in W/m^2
+PMV_DYNAMIC_SENSITIVITY_A: float = 0.303  # matches classic 0.303 gain (report G alignment)
+PMV_DYNAMIC_EXPONENT_PER_WM2: float = -0.036  # argument multiplies absolute metabolic rate (W/m^2)
+PMV_DYNAMIC_BRACKET_INTERCEPT: float = 0.028
+
+# GB 50157 peak crowding reference (persons per square metre)
+MAX_OCCUPANT_DENSITY_PER_M2: float = 9.0
+
+# Clothing compression lower bound (dimensionless) to avoid non-physical clo collapse
+CLOTHING_COMPRESSION_FLOOR: float = 0.7

@@ -1,8 +1,8 @@
 """
 Scenario test: 34 C platform -> 26 C carriage at D = 6 persons/m^2.
 
-Plots PMV_EATM for the first 15 minutes and marks the skin-wettedness threshold
-omega = 0.25 (sensory collapse / boundary-defense onset).
+Plots PMV_EATM for the first 15 minutes, the ISO first-law thermal load L(t)
+with metabolic trajectory M(t), skin wettedness, and the omega = 0.25 marker.
 """
 
 from __future__ import annotations
@@ -44,6 +44,9 @@ def main() -> None:
     pmv_eatm = np.array([r.pmv_eatm for r in series])
     pmv_dyn = np.array([r.pmv_dynamic for r in series])
     omega = np.array([r.skin_wettedness for r in series])
+    thermal_load = np.array([r.thermal_load_wm2 for r in series])
+    met_series = np.array([r.metabolic_met for r in series])
+    bracket = np.array([r.pmv_sensitivity_bracket for r in series])
 
     pmv_base = pmv_iso_baseline_reference()
 
@@ -54,12 +57,12 @@ def main() -> None:
             break
     collapse_t_min = t_min[collapse_idx] if collapse_idx is not None else None
 
-    fig, (ax_pmv, ax_w) = plt.subplots(
-        2,
+    fig, (ax_pmv, ax_l, ax_w) = plt.subplots(
+        3,
         1,
-        figsize=(9, 7),
+        figsize=(9, 9),
         sharex=True,
-        gridspec_kw={"height_ratios": [2.0, 1.1]},
+        gridspec_kw={"height_ratios": [2.0, 1.3, 1.1]},
     )
     ax_pmv.plot(t_min, pmv_eatm, color="#1f77b4", linewidth=2.0, label=r"$PMV_{\mathrm{EATM}}$")
     ax_pmv.plot(
@@ -68,7 +71,7 @@ def main() -> None:
         color="#ff7f0e",
         linewidth=1.4,
         linestyle="--",
-        label=r"$PMV_{\mathrm{dynamic}}$ (crowding physics, no expectancy credit)",
+        label=r"$PMV_{\mathrm{dynamic}} = f(M)\cdot L(t)$ (ISO load, no $\lambda$)",
     )
     ax_pmv.axhline(
         pmv_base,
@@ -86,13 +89,35 @@ def main() -> None:
             label=r"Sensory collapse marker ($\omega \geq 0.25$)",
         )
         ax_w.axvline(collapse_t_min, color="#d62728", linestyle="-.", linewidth=1.2)
+        ax_l.axvline(collapse_t_min, color="#d62728", linestyle="-.", linewidth=1.0, alpha=0.6)
     ax_pmv.set_ylabel("Predicted Mean Vote (PMV)")
-    ax_pmv.set_title("EATM transient comfort: 34 C platform to 26 C carriage, D = 6 pass/m$^2$")
+    ax_pmv.set_title(
+        "EATM: 34 C platform $\\rightarrow$ 26 C carriage, $D=6$ pass/m$^2$ "
+        "(dynamic PMV from metabolic bracket $\\times$ first-law $L$)"
+    )
     ax_pmv.grid(True, alpha=0.3)
-    ax_pmv.legend(loc="best", fontsize=8)
+    ax_pmv.legend(loc="best", fontsize=7)
 
-    ax_w.plot(t_min, omega, color="#9467bd", linewidth=1.8, label=r"Two-node skin wettedness $\omega$")
-    ax_w.axhline(0.25, color="#d62728", linestyle="--", linewidth=1.2, label=r"ISO-style critical $\omega$")
+    ax_l.plot(t_min, thermal_load, color="#17becf", linewidth=1.8, label=r"$L$ (ISO 7730 residual, W/m$^2$)")
+    ax_l.set_ylabel(r"Thermal load $L$ (W/m$^2$)")
+    ax_l.grid(True, alpha=0.3)
+    ax_l.legend(loc="upper left", fontsize=8)
+    ax_m = ax_l.twinx()
+    ax_m.plot(t_min, met_series, color="#7f7f7f", linewidth=1.5, linestyle="--", label=r"$M(t)$ (met)")
+    ax_m.set_ylabel("Metabolic rate (met)", color="#7f7f7f")
+    ax_m.tick_params(axis="y", labelcolor="#7f7f7f")
+    ax_m.legend(loc="upper right", fontsize=8)
+    ax_l.text(
+        0.02,
+        0.05,
+        f"Bracket mean: {float(np.mean(bracket)):.4f} (sensitivity $f(M)$ in W/m$^2$ domain)",
+        transform=ax_l.transAxes,
+        fontsize=7,
+        va="bottom",
+    )
+
+    ax_w.plot(t_min, omega, color="#9467bd", linewidth=1.8, label=r"$\omega = E_{sk}/E_{max}$ (for $f_{def}$)")
+    ax_w.axhline(0.25, color="#d62728", linestyle="--", linewidth=1.2, label=r"Critical $\omega$")
     ax_w.set_xlabel("Time in carriage (minutes)")
     ax_w.set_ylabel(r"Skin wettedness $\omega$ (-)")
     ax_w.set_ylim(0.0, max(0.35, float(np.max(omega)) * 1.15))
@@ -116,6 +141,8 @@ def main() -> None:
     print(f"Wrote figure to {out_path}")
     print(f"Delta SET (fixed shock, SET units): {series[0].delta_set_fixed_k:.3f} K")
     print(f"CBE baseline PMV (reference): {pmv_base:.3f}")
+    print(f"L(t) range (W/m^2): {float(np.min(thermal_load)):.2f} .. {float(np.max(thermal_load)):.2f}")
+    print(f"M(t) range (met): {float(np.min(met_series)):.3f} .. {float(np.max(met_series)):.3f}")
     if collapse_t_min is not None:
         print(f"First crossing of omega = 0.25 at t = {collapse_t_min:.2f} min (index {collapse_idx}).")
     else:
