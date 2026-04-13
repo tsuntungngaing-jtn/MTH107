@@ -30,3 +30,6 @@ build/
 # data/
 # *.csv
 # *.parquet
+
+# EATM demo plots (regenerate with scripts/run_platform_to_carriage_scenario.py)
+EATM-Model-Implementation/output/*.png
