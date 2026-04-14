@@ -148,7 +148,13 @@ def _save_gif(anim: animation.FuncAnimation, out_path: Path, fps: int = 20, dpi:
 
 
 def animation_1_sensory_meltdown(series: ScenarioSeries, out_path: Path, fps: int = 20, dpi: int = 150) -> None:
-    """Dual-panel: omega growth + lambda bar that collapses when omega hits omega_crit."""
+    """Dual-panel: omega growth + lambda bar with readable collapse moment.
+
+    Design choice for presentation fidelity:
+    - Keep lambda as the physically simulated value (no synthetic exponential decay).
+    - Add slow-motion around the threshold crossing by repeating frames near collapse,
+      so the non-linear trigger remains visible without distorting trajectories.
+    """
 
     _set_theme()
     fig, (ax_w, ax_lam) = plt.subplots(1, 2, figsize=(10.8, 4.0), gridspec_kw={"width_ratios": [2.2, 1.0]})
@@ -181,13 +187,23 @@ def animation_1_sensory_meltdown(series: ScenarioSeries, out_path: Path, fps: in
     bar = ax_lam.bar([0.0], [0.0], width=0.65, color="#1f77b4", alpha=0.85)[0]
     txt = ax_lam.text(0.0, lam_abs_max * 1.05, "", ha="center", va="top", fontsize=9)
 
-    # Presentation effect: after collapse, shrink the bar rapidly to emphasize the trigger.
     def _lambda_display(frame: int) -> float:
-        base = float(series.lam[frame])
-        if series.collapse_idx is None or frame < series.collapse_idx:
-            return base
-        k = frame - series.collapse_idx
-        return base * np.exp(-0.9 * k)
+        # Physically faithful display: plot lambda directly from the model.
+        return float(series.lam[frame])
+
+    # Build playback frame indices with local slow-motion around collapse.
+    frame_indices = list(range(len(series.t_min)))
+    if series.collapse_idx is not None:
+        c = int(series.collapse_idx)
+        start = max(0, c - 2)
+        end = min(len(series.t_min) - 1, c + 3)
+        expanded = []
+        for i in range(len(series.t_min)):
+            expanded.append(i)
+            if start <= i <= end:
+                # Repeat key frames around trigger to improve readability.
+                expanded.extend([i, i, i])
+        frame_indices = expanded
 
     def init():
         omega_line.set_data([], [])
@@ -198,29 +214,41 @@ def animation_1_sensory_meltdown(series: ScenarioSeries, out_path: Path, fps: in
         return omega_line, omega_dot, collapse_marker, bar, txt
 
     def update(frame: int):
-        t = series.t_min[: frame + 1]
-        w = series.omega[: frame + 1]
+        src = frame_indices[frame]
+        t = series.t_min[: src + 1]
+        w = series.omega[: src + 1]
         omega_line.set_data(t, w)
         omega_dot.set_offsets(np.array([[t[-1], w[-1]]]))
 
-        if series.collapse_idx is not None and frame >= series.collapse_idx:
+        if series.collapse_idx is not None and src >= series.collapse_idx:
             collapse_marker.set_offsets(np.array([[series.t_min[series.collapse_idx], series.omega[series.collapse_idx]]]))
         else:
             collapse_marker.set_offsets(np.empty((0, 2)))
 
-        lam_h = _lambda_display(frame)
+        lam_h = _lambda_display(src)
         bar.set_height(lam_h)
 
-        if series.collapse_idx is not None and frame >= series.collapse_idx:
-            txt.set_text(rf"Collapse at $t={series.t_min[series.collapse_idx]:.2f}\,\mathrm{{min}}$")
+        if series.collapse_idx is not None and src >= series.collapse_idx:
+            txt.set_text(
+                rf"Crossed $\omega_{{crit}}$ at $t={series.t_min[series.collapse_idx]:.2f}\,\mathrm{{min}}$; "
+                rf"$\lambda(t)={lam_h:.3f}$"
+            )
             bar.set_color("#d62728")
         else:
-            txt.set_text(rf"$\lambda(t) = {float(series.lam[frame]):.3f}$")
+            txt.set_text(rf"$\lambda(t) = {lam_h:.3f}$")
             bar.set_color("#1f77b4")
 
         return omega_line, omega_dot, collapse_marker, bar, txt
 
-    anim = animation.FuncAnimation(fig, update, init_func=init, frames=len(series.t_min), interval=1000 / fps, blit=True, repeat=False)
+    anim = animation.FuncAnimation(
+        fig,
+        update,
+        init_func=init,
+        frames=len(frame_indices),
+        interval=1000 / fps,
+        blit=True,
+        repeat=False,
+    )
     fig.tight_layout()
     _save_gif(anim, out_path, fps=fps, dpi=dpi)
     plt.close(fig)

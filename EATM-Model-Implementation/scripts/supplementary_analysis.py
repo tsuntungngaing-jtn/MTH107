@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -89,166 +90,259 @@ def _first_omega_crossing(
     return float(time_min[idx]), float(omega[idx])
 
 
-def create_heat_partition_stack_figure(
-    density_data: Dict[str, np.ndarray],
+def create_heat_partition_comparison_figure(
+    nominal_data: Dict[str, np.ndarray],
+    crowded_data: Dict[str, np.ndarray],
     out_path: Path,
 ) -> None:
-    """Stacked area chart of C, R, and E_sk for a single density case."""
+    """Stacked-bar comparison at t=15 min: nominal (D=0) vs crowded (D=6)."""
 
-    time_min = density_data["time_min"]
-    c = density_data["C"]
-    r = density_data["R"]
-    esk = density_data["E_sk"]
+    labels = ["Nominal (D=0)", "Crowded (D=6)"]
+    x = np.arange(2, dtype=float)
 
-    fig, ax = plt.subplots(figsize=(9.0, 5.4))
+    c = np.array([nominal_data["C"][-1], crowded_data["C"][-1]], dtype=float)
+    r = np.array([nominal_data["R"][-1], crowded_data["R"][-1]], dtype=float)
+    esk = np.array([nominal_data["E_sk"][-1], crowded_data["E_sk"][-1]], dtype=float)
+    total = c + r + esk
+    sensible = c + r
 
     colors = {
         "C": "#3182bd",  # blue
         "R": "#9e9ac8",  # violet
-        "E_sk": "#fc9272",  # warm red/orange
+        "E_sk": "#fc9272",  # warm red
     }
 
-    ax.stackplot(
-        time_min,
-        c,
-        r,
+    fig, ax = plt.subplots(figsize=(9.0, 5.6))
+    width = 0.58
+    b_c = ax.bar(x, c, width=width, color=colors["C"], label=r"Convection, $C$")
+    b_r = ax.bar(x, r, width=width, bottom=c, color=colors["R"], label=r"Radiation, $R$")
+    b_e = ax.bar(
+        x,
         esk,
-        labels=[
-            r"Convection, $C$",
-            r"Radiation, $R$",
-            r"Skin latent, $E_{\mathrm{sk}}$",
-        ],
-        colors=[colors["C"], colors["R"], colors["E_sk"]],
-        alpha=0.9,
+        width=width,
+        bottom=c + r,
+        color=colors["E_sk"],
+        label=r"Skin latent, $E_{\mathrm{sk}}$",
     )
 
-    # Highlight the transition to E_sk dominance using a vertical marker at
-    # the time where E_sk first exceeds the combined dry channels.
-    total_dry = c + r
-    dominance_idx = np.where(esk >= total_dry)[0]
-    if dominance_idx.size > 0:
-        j = int(dominance_idx[0])
-        t_dom = float(time_min[j])
-        ax.axvline(
-            t_dom,
-            color="black",
-            linestyle="--",
-            linewidth=1.3,
-            alpha=0.8,
+    # Percentage labels to emphasize pathway distortion at D=6.
+    for i in range(2):
+        ax.text(
+            x[i],
+            c[i] / 2.0,
+            f"{100.0 * c[i] / total[i]:.1f}%",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="white",
+            fontweight="bold",
         )
         ax.text(
-            t_dom,
-            0.98 * float((c + r + esk).max()),
-            r"$E_{\mathrm{sk}}$ dominant",
-            rotation=90,
-            va="top",
-            ha="right",
-            fontsize=9,
+            x[i],
+            c[i] + r[i] / 2.0,
+            f"{100.0 * r[i] / total[i]:.1f}%",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="white",
+            fontweight="bold",
+        )
+        ax.text(
+            x[i],
+            c[i] + r[i] + esk[i] / 2.0,
+            f"{100.0 * esk[i] / total[i]:.1f}%",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="black",
+            fontweight="bold",
+        )
+        ax.text(
+            x[i],
+            total[i] + 0.9,
+            rf"$C+R={sensible[i]:.2f}$ ({100.0 * sensible[i] / total[i]:.1f}%)",
+            ha="center",
+            va="bottom",
+            fontsize=8,
         )
 
-    ax.set_xlabel(r"Time in carriage, $t\;(\mathrm{min})$")
-    ax.set_ylabel(r"Heat loss components, $q\;(\mathrm{W/m^2})$")
+    ax.annotate(
+        r"Crowding distortion: dry channels ($C+R$) compressed," "\n"
+        r"thermal balance forced toward $E_{\mathrm{sk}}$",
+        xy=(x[1], total[1]),
+        xytext=(1.35, max(total) * 0.80),
+        textcoords="data",
+        arrowprops={"arrowstyle": "->", "lw": 1.2, "color": "black"},
+        fontsize=9,
+        ha="left",
+        va="center",
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(r"Heat-loss component, $q\;(\mathrm{W/m^2})$")
     ax.set_title(
-        r"Transition of first-law channels under crowding: "
-        r"$E_{\mathrm{sk}}$ emerges as the dominant pathway (D=6)",
+        r"Heat-loss partition comparison at $t=15\;\mathrm{min}$: "
+        r"Nominal vs. Crowded microclimate",
         pad=10,
     )
-    ax.grid(True, alpha=0.25)
-    ax.set_xlim(time_min.min(), time_min.max())
-    ax.legend(loc="upper left", fontsize=9, frameon=True)
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(loc="upper right", fontsize=9, frameon=True)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
 
+    # Optional animation: progressive reveal of stacked bars.
+    anim_dir = out_path.parent / "animations"
+    anim_dir.mkdir(parents=True, exist_ok=True)
+    anim_path = anim_dir / "heat_partition_comparison.gif"
 
-def create_omega_sensitivity_figure(
+    fig_a, ax_a = plt.subplots(figsize=(9.0, 5.6))
+    ax_a.set_xticks(x)
+    ax_a.set_xticklabels(labels)
+    ax_a.set_ylabel(r"Heat-loss component, $q\;(\mathrm{W/m^2})$")
+    ax_a.set_title(r"Progressive partition reveal: Nominal vs. Crowded", pad=10)
+    ax_a.grid(True, axis="y", alpha=0.25)
+    ax_a.set_ylim(0.0, float(max(total) * 1.25))
+
+    bar_c = ax_a.bar(x, [0.0, 0.0], width=width, color=colors["C"], label=r"$C$")
+    bar_r = ax_a.bar(x, [0.0, 0.0], width=width, bottom=[0.0, 0.0], color=colors["R"], label=r"$R$")
+    bar_e = ax_a.bar(x, [0.0, 0.0], width=width, bottom=[0.0, 0.0], color=colors["E_sk"], label=r"$E_{\mathrm{sk}}$")
+    ax_a.legend(loc="upper right", frameon=True, fontsize=9)
+
+    def _anim_update(frame: int):
+        frac = frame / 40.0
+        c_now = c * frac
+        r_now = r * frac
+        e_now = esk * frac
+        for i in range(2):
+            bar_c[i].set_height(c_now[i])
+            bar_r[i].set_y(c_now[i])
+            bar_r[i].set_height(r_now[i])
+            bar_e[i].set_y(c_now[i] + r_now[i])
+            bar_e[i].set_height(e_now[i])
+        return tuple(bar_c) + tuple(bar_r) + tuple(bar_e)
+
+    anim = animation.FuncAnimation(
+        fig_a,
+        _anim_update,
+        frames=41,
+        interval=40,
+        blit=True,
+        repeat=False,
+    )
+    anim.save(anim_path, writer=animation.PillowWriter(fps=20), dpi=140)
+    plt.close(fig_a)
+
+
+def create_omega_max_sensitivity_figure(
     densities: List[int],
     density_series: Dict[int, Dict[str, np.ndarray]],
     out_path: Path,
     omega_crit: float = 0.25,
-    horizon_min: float = 15.0,
 ) -> None:
-    """Line plot of time-to-meltdown as a function of density D."""
-
-    times_to_crit: List[float] = []
-    for d in densities:
-        series = density_series[d]
-        crossing = _first_omega_crossing(series["time_min"], series["omega"], threshold=omega_crit)
-        if crossing is None:
-            times_to_crit.append(np.nan)
-        else:
-            t_c, _ = crossing
-            times_to_crit.append(t_c)
+    """Line+scatter plot of omega_max versus density D."""
 
     d_array = np.array(densities, dtype=float)
-    t_array = np.array(times_to_crit, dtype=float)
-    reached_mask = np.isfinite(t_array)
-    censored_mask = ~reached_mask
-    t_plot = np.where(reached_mask, t_array, horizon_min)
+    omega_max = np.array([float(np.max(density_series[d]["omega"])) for d in densities], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    cross_idx = np.where(omega_max >= omega_crit)[0]
+    cross_i = int(cross_idx[0]) if cross_idx.size > 0 else None
 
+    fig, ax = plt.subplots(figsize=(7.6, 4.8))
     ax.plot(
-        d_array[reached_mask],
-        t_plot[reached_mask],
-        marker="o",
-        linewidth=2.2,
+        d_array,
+        omega_max,
         color="#08519c",
-        label=rf"Time to $\omega_{{\mathrm{{crit}}}}={omega_crit:.2f}$",
+        linewidth=2.2,
+        marker="o",
+        markersize=5.5,
+        label=r"$\omega_{\max}(D)$",
     )
-    if np.any(censored_mask):
+    ax.axhline(
+        omega_crit,
+        color="#d62728",
+        linestyle="--",
+        linewidth=1.4,
+        label=rf"Critical Threshold ({omega_crit:.2f})",
+    )
+
+    if cross_i is not None:
         ax.scatter(
-            d_array[censored_mask],
-            t_plot[censored_mask],
-            marker="v",
-            s=55,
-            color="#6a51a3",
-            label=rf"No crossing within {horizon_min:.0f} min",
-            zorder=4,
+            [d_array[cross_i]],
+            [omega_max[cross_i]],
+            s=75,
+            marker="D",
+            color="#2ca02c",
+            edgecolor="white",
+            linewidth=0.9,
+            zorder=5,
+            label=rf"First crossing at $D={int(d_array[cross_i])}$",
+        )
+        ax.annotate(
+            rf"$D={int(d_array[cross_i])}$ crosses $\omega_{{crit}}$",
+            xy=(d_array[cross_i], omega_max[cross_i]),
+            xytext=(d_array[cross_i] + 0.8, omega_max[cross_i] + 0.015),
+            arrowprops={"arrowstyle": "->", "lw": 1.1},
+            fontsize=8,
+            ha="left",
+            va="bottom",
         )
 
-    # Emphasize the reference D=6 point, if present.
-    if 6 in densities:
-        idx6 = densities.index(6)
-        if np.isfinite(t_plot[idx6]):
-            ax.scatter(
-                [d_array[idx6]],
-                [t_plot[idx6]],
-                color="#de2d26",
-                edgecolor="white",
-                linewidth=0.9,
-                s=60,
-                zorder=4,
-                label=r"$D=6\;\mathrm{pass/m^2}$ reference",
-            )
-
     ax.set_xlabel(r"Occupant density, $D\;(\mathrm{pass/m^2})$")
-    ax.set_ylabel(
-        rf"Time to $\omega_{{\mathrm{{crit}}}}={omega_crit:.2f}$, "
-        r"$t_{\mathrm{meltdown}}\;(\mathrm{min})$"
-    )
+    ax.set_ylabel(r"Peak skin wettedness, $\omega_{\max}\;(-)$")
     ax.set_title(
-        r"Sensitivity of meltdown timing to crowding: "
-        r"$t_{\mathrm{meltdown}}$ vs. $D$",
+        r"Crowding sensitivity of physiological load: "
+        r"$\omega_{\max}$ vs. $D$",
         pad=10,
     )
     ax.grid(True, alpha=0.3)
     ax.set_xlim(d_array.min() - 0.2, d_array.max() + 0.2)
-    ax.set_ylim(0.0, max(horizon_min * 1.05, float(np.nanmax(t_plot)) + 0.5))
+    ax.set_ylim(max(0.10, float(np.min(omega_max)) - 0.02), float(np.max(omega_max)) + 0.03)
     ax.legend(loc="best", fontsize=8, frameon=True)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
 
+    # Optional animation: trajectory of omega_max accumulation over density sweep.
+    anim_dir = out_path.parent / "animations"
+    anim_dir.mkdir(parents=True, exist_ok=True)
+    anim_path = anim_dir / "omega_max_vs_density.gif"
+
+    fig_a, ax_a = plt.subplots(figsize=(7.6, 4.8))
+    ax_a.axhline(omega_crit, color="#d62728", linestyle="--", linewidth=1.4)
+    ax_a.set_xlabel(r"Occupant density, $D\;(\mathrm{pass/m^2})$")
+    ax_a.set_ylabel(r"Peak skin wettedness, $\omega_{\max}\;(-)$")
+    ax_a.set_title(r"Density sweep animation: $\omega_{\max}(D)$", pad=10)
+    ax_a.grid(True, alpha=0.3)
+    ax_a.set_xlim(d_array.min() - 0.2, d_array.max() + 0.2)
+    ax_a.set_ylim(max(0.10, float(np.min(omega_max)) - 0.02), float(np.max(omega_max)) + 0.03)
+    (line,) = ax_a.plot([], [], color="#08519c", linewidth=2.2, marker="o", markersize=5.5)
+
+    def _omega_update(frame: int):
+        line.set_data(d_array[: frame + 1], omega_max[: frame + 1])
+        return (line,)
+
+    anim = animation.FuncAnimation(
+        fig_a,
+        _omega_update,
+        frames=len(d_array),
+        interval=260,
+        blit=True,
+        repeat=False,
+    )
+    anim.save(anim_path, writer=animation.PillowWriter(fps=4), dpi=140)
+    plt.close(fig_a)
+
 
 def main() -> None:
     """Entry point to generate supplementary analysis figures."""
 
-    # Density D=6 stack figure (heat-partition evolution).
-    d_stack = 6.0
-    stack_series = _simulate_density_series(d_stack)
+    # End-state partition comparison: nominal D=0 vs crowded D=6.
+    nominal_series = _simulate_density_series(0.0)
+    crowded_series = _simulate_density_series(6.0)
 
     # Sensitivity sweep for D in [0, 9].
     densities_int: List[int] = list(range(0, 10))
@@ -259,20 +353,21 @@ def main() -> None:
     out_dir = ROOT / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    stack_path = out_dir / "heat_partition_stack_D6.png"
-    omega_sensitivity_path = out_dir / "omega_meltdown_sensitivity.png"
+    comparison_path = out_dir / "heat_partition_comparison.png"
+    omega_sensitivity_path = out_dir / "omega_max_vs_density.png"
 
-    create_heat_partition_stack_figure(stack_series, stack_path)
-    create_omega_sensitivity_figure(
+    create_heat_partition_comparison_figure(nominal_series, crowded_series, comparison_path)
+    create_omega_max_sensitivity_figure(
         densities_int,
         sensitivity_series,
         omega_sensitivity_path,
         omega_crit=0.25,
-        horizon_min=15.0,
     )
 
-    print(f"Wrote figure: {stack_path}")
+    print(f"Wrote figure: {comparison_path}")
     print(f"Wrote figure: {omega_sensitivity_path}")
+    print(f"Wrote animation: {out_dir / 'animations' / 'heat_partition_comparison.gif'}")
+    print(f"Wrote animation: {out_dir / 'animations' / 'omega_max_vs_density.gif'}")
 
 
 if __name__ == "__main__":
